@@ -4,15 +4,19 @@ import threading
 import requests
 
 from flask import Flask
-from telegram import Bot
+
+from telegram import Update
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    ContextTypes
+)
 
 TOKEN = os.getenv("TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
-
-bot = Bot(token=TOKEN)
 
 app = Flask(__name__)
 
+# Palavras monitoradas
 palavras = [
     "headset",
     "webcam",
@@ -20,6 +24,7 @@ palavras = [
     "memória ram"
 ]
 
+# Evita mensagens repetidas
 enviados = set()
 
 
@@ -28,40 +33,54 @@ def home():
     return "Bot PNCP online!"
 
 
-def buscar_pncp():
+# =========================
+# FUNÇÃO DE BUSCA PNCP
+# =========================
+
+async def buscar_pncp_manual(chat_id, app_telegram):
 
     url = "https://pncp.gov.br/api/consulta/v1/contratacoes/publicacao"
 
-    resposta = requests.get(url, timeout=30)
+    try:
 
-    print("Status PNCP:", resposta.status_code)
+        resposta = requests.get(url, timeout=30)
 
-    if resposta.status_code != 200:
-        return
+        print("Status PNCP:", resposta.status_code)
 
-    dados = resposta.json().get("data", [])
+        if resposta.status_code != 200:
 
-    print("Itens encontrados:", len(dados))
+            await app_telegram.bot.send_message(
+                chat_id=chat_id,
+                text="❌ Erro ao consultar PNCP."
+            )
 
-    for item in dados:
+            return
 
-        texto = str(item).lower()
+        dados = resposta.json().get("data", [])
 
-        for palavra in palavras:
+        encontrados = 0
 
-            if palavra.lower() in texto:
+        for item in dados:
 
-                id_item = item.get("numeroControlePNCP")
+            texto = str(item).lower()
 
-                if not id_item:
-                    continue
+            for palavra in palavras:
 
-                if id_item in enviados:
-                    continue
+                if palavra.lower() in texto:
 
-                enviados.add(id_item)
+                    id_item = item.get("numeroControlePNCP")
 
-                mensagem = f"""
+                    if not id_item:
+                        continue
+
+                    if id_item in enviados:
+                        continue
+
+                    enviados.add(id_item)
+
+                    encontrados += 1
+
+                    mensagem = f"""
 📢 Nova oportunidade encontrada!
 
 🔎 Palavra: {palavra}
@@ -73,34 +92,206 @@ def buscar_pncp():
 {item.get('orgaoEntidade', {}).get('razaoSocial', 'Não informado')}
 """
 
-                print("Enviando mensagem...")
+                    await app_telegram.bot.send_message(
+                        chat_id=chat_id,
+                        text=mensagem
+                    )
 
-                bot.send_message(
-                    chat_id=CHAT_ID,
-                    text=mensagem
-                )
+        if encontrados == 0:
+
+            await app_telegram.bot.send_message(
+                chat_id=chat_id,
+                text="🔍 Nenhuma nova oportunidade encontrada."
+            )
+
+    except Exception as e:
+
+        print(e)
+
+        await app_telegram.bot.send_message(
+            chat_id=chat_id,
+            text=f"❌ Erro: {e}"
+        )
 
 
-def loop_bot():
+# =========================
+# LOOP AUTOMÁTICO
+# =========================
 
-    bot.send_message(
-        chat_id=CHAT_ID,
-        text="✅ Bot iniciado com sucesso!"
-    )
+def loop_busca(app_telegram, chat_id):
 
     while True:
 
         try:
-            buscar_pncp()
+
+            requests.get("https://pncp.gov.br")
+
+            url = "https://pncp.gov.br/api/consulta/v1/contratacoes/publicacao"
+
+            resposta = requests.get(url, timeout=30)
+
+            if resposta.status_code == 200:
+
+                dados = resposta.json().get("data", [])
+
+                for item in dados:
+
+                    texto = str(item).lower()
+
+                    for palavra in palavras:
+
+                        if palavra.lower() in texto:
+
+                            id_item = item.get("numeroControlePNCP")
+
+                            if not id_item:
+                                continue
+
+                            if id_item in enviados:
+                                continue
+
+                            enviados.add(id_item)
+
+                            mensagem = f"""
+📢 Nova oportunidade encontrada!
+
+🔎 Palavra: {palavra}
+
+📄 Objeto:
+{item.get('objetoCompra', 'Sem descrição')}
+
+🏢 Órgão:
+{item.get('orgaoEntidade', {}).get('razaoSocial', 'Não informado')}
+"""
+
+                            app_telegram.bot.send_message(
+                                chat_id=chat_id,
+                                text=mensagem
+                            )
 
         except Exception as e:
-            print(f"Erro: {e}")
+
+            print(f"Erro loop: {e}")
 
         time.sleep(300)
 
 
+# =========================
+# COMANDOS TELEGRAM
+# =========================
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    mensagem = """
+✅ Bot PNCP iniciado!
+
+Comandos disponíveis:
+
+/listar
+/add palavra
+/remove palavra
+/buscar
+"""
+
+    await update.message.reply_text(mensagem)
+
+
+async def listar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    texto = "📋 Palavras monitoradas:\n\n"
+
+    for p in palavras:
+        texto += f"• {p}\n"
+
+    await update.message.reply_text(texto)
+
+
+async def add(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    if not context.args:
+
+        await update.message.reply_text(
+            "Use:\n/add headset"
+        )
+
+        return
+
+    nova = " ".join(context.args).lower()
+
+    if nova in palavras:
+
+        await update.message.reply_text(
+            "⚠️ Palavra já existe."
+        )
+
+        return
+
+    palavras.append(nova)
+
+    await update.message.reply_text(
+        f"✅ Palavra adicionada: {nova}"
+    )
+
+
+async def remove(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    if not context.args:
+
+        await update.message.reply_text(
+            "Use:\n/remove headset"
+        )
+
+        return
+
+    palavra = " ".join(context.args).lower()
+
+    if palavra not in palavras:
+
+        await update.message.reply_text(
+            "❌ Palavra não encontrada."
+        )
+
+        return
+
+    palavras.remove(palavra)
+
+    await update.message.reply_text(
+        f"🗑 Palavra removida: {palavra}"
+    )
+
+
+async def buscar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    await update.message.reply_text(
+        "🔍 Buscando oportunidades..."
+    )
+
+    await buscar_pncp_manual(
+        update.effective_chat.id,
+        context.application
+    )
+
+
+# =========================
+# INICIAR BOT
+# =========================
+
+telegram_app = ApplicationBuilder().token(TOKEN).build()
+
+telegram_app.add_handler(CommandHandler("start", start))
+telegram_app.add_handler(CommandHandler("listar", listar))
+telegram_app.add_handler(CommandHandler("add", add))
+telegram_app.add_handler(CommandHandler("remove", remove))
+telegram_app.add_handler(CommandHandler("buscar", buscar))
+
+
+def iniciar_bot():
+
+    telegram_app.run_polling()
+
+
 threading.Thread(
-    target=loop_bot,
+    target=iniciar_bot,
     daemon=True
 ).start()
 
