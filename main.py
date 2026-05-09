@@ -6,8 +6,8 @@ import requests
 from flask import Flask
 from telegram import Bot
 
-TOKEN = "8725171682:AAHwAZC05Axrpm5leyC4btpn6ELJ2i7x_aI"
-CHAT_ID = "8725171682"
+TOKEN = os.getenv("TOKEN")
+CHAT_ID = os.getenv("CHAT_ID")
 
 bot = Bot(token=TOKEN)
 
@@ -34,10 +34,14 @@ def buscar_pncp():
 
     resposta = requests.get(url, timeout=30)
 
+    print("Status PNCP:", resposta.status_code)
+
     if resposta.status_code != 200:
         return
 
     dados = resposta.json().get("data", [])
+
+    print("Itens encontrados:", len(dados))
 
     for item in dados:
 
@@ -69,6 +73,8 @@ def buscar_pncp():
 {item.get('orgaoEntidade', {}).get('razaoSocial', 'Não informado')}
 """
 
+                print("Enviando mensagem...")
+
                 bot.send_message(
                     chat_id=CHAT_ID,
                     text=mensagem
@@ -76,6 +82,11 @@ def buscar_pncp():
 
 
 def loop_bot():
+
+    bot.send_message(
+        chat_id=CHAT_ID,
+        text="✅ Bot iniciado com sucesso!"
+    )
 
     while True:
 
@@ -88,8 +99,10 @@ def loop_bot():
         time.sleep(300)
 
 
-thread = threading.Thread(target=loop_bot)
-thread.start()
+threading.Thread(
+    target=loop_bot,
+    daemon=True
+).start()
 
 
 if __name__ == "__main__":
