@@ -1,11 +1,17 @@
-import requests
+import os
 import time
+import threading
+import requests
+
+from flask import Flask
 from telegram import Bot
 
-TOKEN = "8725171682:AAHwAZC05Axrpm5leyC4btpn6ELJ2i7x_aI"
-CHAT_ID = "8725171682"
+TOKEN = os.getenv("TOKEN")
+CHAT_ID = os.getenv("CHAT_ID")
 
 bot = Bot(token=TOKEN)
+
+app = Flask(__name__)
 
 palavras = [
     "headset",
@@ -16,26 +22,42 @@ palavras = [
 
 enviados = set()
 
+
+@app.route("/")
+def home():
+    return "Bot PNCP online!"
+
+
 def buscar_pncp():
+
     url = "https://pncp.gov.br/api/consulta/v1/contratacoes/publicacao"
 
-    resposta = requests.get(url)
+    resposta = requests.get(url, timeout=30)
 
-    if resposta.status_code == 200:
-        dados = resposta.json().get("data", [])
+    if resposta.status_code != 200:
+        return
 
-        for item in dados:
-            texto = str(item).lower()
+    dados = resposta.json().get("data", [])
 
-            for palavra in palavras:
-                if palavra in texto:
+    for item in dados:
 
-                    id_item = item.get("numeroControlePNCP")
+        texto = str(item).lower()
 
-                    if id_item not in enviados:
-                        enviados.add(id_item)
+        for palavra in palavras:
 
-                        mensagem = f"""
+            if palavra.lower() in texto:
+
+                id_item = item.get("numeroControlePNCP")
+
+                if not id_item:
+                    continue
+
+                if id_item in enviados:
+                    continue
+
+                enviados.add(id_item)
+
+                mensagem = f"""
 📢 Nova oportunidade encontrada!
 
 🔎 Palavra: {palavra}
@@ -47,16 +69,34 @@ def buscar_pncp():
 {item.get('orgaoEntidade', {}).get('razaoSocial', 'Não informado')}
 """
 
-                        bot.send_message(
-                            chat_id=CHAT_ID,
-                            text=mensagem
-                        )
+                bot.send_message(
+                    chat_id=CHAT_ID,
+                    text=mensagem
+                )
 
-while True:
-    try:
-        buscar_pncp()
 
-    except Exception as e:
-        print(e)
+def loop_bot():
 
-    time.sleep(300)
+    while True:
+
+        try:
+            buscar_pncp()
+
+        except Exception as e:
+            print(f"Erro: {e}")
+
+        time.sleep(300)
+
+
+thread = threading.Thread(target=loop_bot)
+thread.start()
+
+
+if __name__ == "__main__":
+
+    port = int(os.environ.get("PORT", 10000))
+
+    app.run(
+        host="0.0.0.0",
+        port=port
+    )
