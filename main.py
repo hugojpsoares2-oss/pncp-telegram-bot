@@ -272,35 +272,38 @@ async def buscar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+import asyncio
+
+# ... (seus handlers e funções permanecem iguais)
+
 # =========================
 # INICIAR BOT
 # =========================
 
-telegram_app = ApplicationBuilder().token(TOKEN).build()
+def rodar_bot_thread():
+    # Cria um novo loop de eventos para esta thread
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
+    # Configura a aplicação
+    telegram_app = ApplicationBuilder().token(TOKEN).build()
 
-telegram_app.add_handler(CommandHandler("start", start))
-telegram_app.add_handler(CommandHandler("listar", listar))
-telegram_app.add_handler(CommandHandler("add", add))
-telegram_app.add_handler(CommandHandler("remove", remove))
-telegram_app.add_handler(CommandHandler("buscar", buscar))
+    telegram_app.add_handler(CommandHandler("start", start))
+    telegram_app.add_handler(CommandHandler("listar", listar))
+    telegram_app.add_handler(CommandHandler("add", add))
+    telegram_app.add_handler(CommandHandler("remove", remove))
+    telegram_app.add_handler(CommandHandler("buscar", buscar))
 
-
-def iniciar_bot():
-
-    telegram_app.run_polling()
-
-
-threading.Thread(
-    target=iniciar_bot,
-    daemon=True
-).start()
-
+    print("Bot do Telegram iniciado...")
+    
+    # Roda o bot dentro do loop da thread
+    telegram_app.run_polling(close_loop=False)
 
 if __name__ == "__main__":
+    # Inicia o Telegram em background
+    t = threading.Thread(target=rodar_bot_thread, daemon=True)
+    t.start()
 
+    # Inicia o Flask (Bloqueante, mantém o script vivo)
     port = int(os.environ.get("PORT", 10000))
-
-    app.run(
-        host="0.0.0.0",
-        port=port
-    )
+    app.run(host="0.0.0.0", port=port)
