@@ -9,7 +9,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
 # Configurações Iniciais
 TOKEN = os.getenv("TOKEN")
-MY_URL = "https://pncp-telegram-bot.onrender.com/" # VERIFIQUE SE É ESTA MESMA
+MY_URL = "https://pncp-telegram-bot.onrender.com/"
 app = Flask(__name__)
 
 # Variáveis globais
@@ -28,19 +28,18 @@ async def auto_ping(context: ContextTypes.DEFAULT_TYPE):
     try:
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, lambda: requests.get(MY_URL, timeout=10))
-        print("⛽ [Auto-Ping] Bot se auto-alimentou para não dormir.")
+        print("⛽ [Auto-Ping] Bot se auto-alimentou.")
     except Exception as e:
-        print(f"⚠️ [Auto-Ping] Erro ao tentar se manter vivo: {e}")
+        print(f"⚠️ [Auto-Ping] Erro: {e}")
 
 async def verificar_pncp(context: ContextTypes.DEFAULT_TYPE):
     global CHAT_ID_MONITORAMENTO, VALOR_MAXIMO, enviados, ultima_limpeza
     
-    # Limpa a memória todo dia à meia-noite
     hoje_dt = datetime.now()
     if hoje_dt.day != ultima_limpeza:
         enviados.clear()
         ultima_limpeza = hoje_dt.day
-        print("🧹 [Memória] Lista de enviados limpa para o novo dia.")
+        print("🧹 [Memória] Lista limpa para o novo dia.")
 
     if not CHAT_ID_MONITORAMENTO:
         return
@@ -74,7 +73,9 @@ async def verificar_pncp(context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         print(f"💥 [Erro PNCP]: {e}")
 
-# Comandos do Telegram
+# ==========================================
+# COMANDOS DO TELEGRAM (Recriados)
+# ==========================================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global CHAT_ID_MONITORAMENTO
     CHAT_ID_MONITORAMENTO = update.effective_chat.id
@@ -87,6 +88,31 @@ async def valor_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             VALOR_MAXIMO = float(context.args[0].replace(",", "."))
             await update.message.reply_text(f"✅ Novo limite: R$ {VALOR_MAXIMO:,.2f}")
         except: await update.message.reply_text("Use: /valor 5000")
+    else:
+        await update.message.reply_text(f"Valor atual: R$ {VALOR_MAXIMO}")
+
+async def listar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    texto = f"📋 *Configurações:*\n💰 Valor Máx: R$ {VALOR_MAXIMO}\n\n*Palavras:*\n" + "\n".join([f"• {p}" for p in palavras])
+    await update.message.reply_text(texto, parse_mode="Markdown")
+
+async def add(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    nova = " ".join(context.args).lower()
+    if nova:
+        if nova not in palavras:
+            palavras.append(nova)
+            await update.message.reply_text(f"✅ Adicionada: {nova}")
+        else:
+            await update.message.reply_text("⚠️ Já está na lista.")
+    else:
+        await update.message.reply_text("Use: /add termo")
+
+async def remove(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    p = " ".join(context.args).lower()
+    if p in palavras:
+        palavras.remove(p)
+        await update.message.reply_text(f"🗑 Removida: {p}")
+    else:
+        await update.message.reply_text("❌ Não encontrada.")
 
 def iniciar_flask():
     port = int(os.environ.get("PORT", 10000))
@@ -96,13 +122,17 @@ if __name__ == "__main__":
     if TOKEN:
         threading.Thread(target=iniciar_flask, daemon=True).start()
         application = ApplicationBuilder().token(TOKEN).build()
+        
+        # REGISTRO OBRIGATÓRIO DOS COMANDOS
         application.add_handler(CommandHandler("start", start))
         application.add_handler(CommandHandler("valor", valor_cmd))
+        application.add_handler(CommandHandler("listar", listar))
+        application.add_handler(CommandHandler("add", add))
+        application.add_handler(CommandHandler("remove", remove))
         
         if application.job_queue:
-            # Busca licitações a cada 5 min
             application.job_queue.run_repeating(verificar_pncp, interval=300, first=10)
-            # Auto-ping a cada 12 min (para intercalar com o UptimeRobot)
             application.job_queue.run_repeating(auto_ping, interval=720, first=30)
         
+        print("✅ Bot Rodando com todos os comandos!")
         application.run_polling(drop_pending_updates=True)
