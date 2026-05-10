@@ -21,27 +21,33 @@ def home():
 # ==========================================
 # LÓGICA DE BUSCA PNCP
 # ==========================================
+from datetime import datetime
+
 async def verificar_pncp(context: ContextTypes.DEFAULT_TYPE):
     global CHAT_ID_MONITORAMENTO
     
-    # Log para você saber que o ciclo de 5 minutos rodou
     print("🔍 [PNCP] Iniciando busca de novas oportunidades...")
     
     if not CHAT_ID_MONITORAMENTO:
         print("⚠️ [PNCP] Busca cancelada: CHAT_ID ainda não definido. Dê /start no Telegram.")
         return
 
-    url = "https://pncp.gov.br/api/consulta/v1/contratacoes/publicacao"
+    # Pega a data de hoje no formato exigido pela API: AAAAMMDD
+    hoje = datetime.now().strftime("%Y%m%d")
+    
+    # Adicionamos os parâmetros na URL (data inicial e página 1)
+    url = f"https://pncp.gov.br/api/consulta/v1/contratacoes/publicacao?dataInicial={hoje}&pagina=1"
+    
     try:
         loop = asyncio.get_event_loop()
-        # Faz a requisição
         resposta = await loop.run_in_executor(None, lambda: requests.get(url, timeout=20))
         
         print(f"📡 [PNCP] Status da API: {resposta.status_code}")
 
         if resposta.status_code == 200:
+            # A API do PNCP retorna os dados dentro de 'data'
             dados = resposta.json().get("data", [])
-            print(f"📦 [PNCP] {len(dados)} itens recebidos do portal.")
+            print(f"📦 [PNCP] {len(dados)} itens recebidos hoje ({hoje}).")
             
             encontrados_nesta_rodada = 0
             for item in dados:
@@ -56,13 +62,14 @@ async def verificar_pncp(context: ContextTypes.DEFAULT_TYPE):
                         msg = (f"📢 **Nova Oportunidade!**\n\n"
                                f"🔎 Termo: {palavra}\n"
                                f"🏢 Órgão: {item.get('orgaoEntidade', {}).get('razaoSocial')}\n"
-                               f"📄 Objeto: {item.get('objetoCompra', 'Sem descrição')}")
+                               f"📄 Objeto: {item.get('objetoCompra', 'Sem descrição')}\n"
+                               f"🔗 [Link da Contratação](https://pncp.gov.br/app/editais/{item.get('orgaoEntidade', {}).get('cnpj')}/{item.get('anoContratacao')}/{item.get('sequencialContratacao')})")
                         
-                        await context.bot.send_message(chat_id=CHAT_ID_MONITORAMENTO, text=msg)
+                        await context.bot.send_message(chat_id=CHAT_ID_MONITORAMENTO, text=msg, parse_mode="Markdown")
             
             print(f"✅ [PNCP] Busca finalizada. {encontrados_nesta_rodada} novas oportunidades enviadas.")
         else:
-            print(f"❌ [PNCP] Erro na API: {resposta.text}")
+            print(f"❌ [PNCP] Erro na API: {resposta.status_code} - {resposta.text}")
 
     except Exception as e:
         print(f"💥 [PNCP] Erro crítico na busca: {e}")
