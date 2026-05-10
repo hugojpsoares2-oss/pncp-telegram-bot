@@ -51,7 +51,7 @@ async def verificar_pncp(context: ContextTypes.DEFAULT_TYPE):
         print(f"Erro na busca automática: {e}")
 
 # ==========================================
-# COMANDOS TELEGRAM
+# FUNÇÕES DOS COMANDOS (Onde estava o erro)
 # ==========================================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global CHAT_ID_MONITORAMENTO
@@ -89,28 +89,32 @@ async def remove(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ==========================================
 def iniciar_flask():
     port = int(os.environ.get("PORT", 10000))
+    # use_reloader=False é vital aqui para evitar duplicar o bot
     app.run(host="0.0.0.0", port=port, use_reloader=False)
 
 if __name__ == "__main__":
     if not TOKEN:
         print("❌ ERRO: Variável TOKEN não configurada no Render!")
     else:
-        # 1. Flask em segundo plano para o UptimeRobot
-        print("🌐 Iniciando Flask (Background)...")
-        threading.Thread(target=iniciar_flask, daemon=True).start()
+        # 1. Flask em segundo plano para o UptimeRobot responder 200
+        print("🌐 Iniciando servidor Flask para UptimeRobot...")
+        t_flask = threading.Thread(target=iniciar_flask, daemon=True)
+        t_flask.start()
 
-        # 2. Bot na Thread Principal (Correção do RuntimeError)
-        print("🚀 Iniciando Bot Telegram (Main Thread)...")
+        # 2. Bot na Thread Principal (Correção do RuntimeError de sinais)
+        print("🚀 Iniciando Bot do Telegram na thread principal...")
+        
         application = ApplicationBuilder().token(TOKEN).build()
         
-        # Handlers
+        # Registrar os Handlers corretamente
         application.add_handler(CommandHandler("start", start))
         application.add_handler(CommandHandler("listar", listar))
         application.add_handler(CommandHandler("add", add))
         application.add_handler(CommandHandler("remove", remove))
         
-        # Monitoramento automático a cada 5 min
+        # Configura o monitoramento automático (JobQueue)
         if application.job_queue:
             application.job_queue.run_repeating(verificar_pncp, interval=300, first=10)
         
+        print("✅ Tudo pronto! Aguardando comandos no Telegram...")
         application.run_polling()
