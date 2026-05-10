@@ -58,27 +58,38 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ==========================================
 # INICIALIZAÇÃO DO BOT
 # ==========================================
-def run_telegram_bot():
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    
-    # O segredo está aqui: JobQueue gerencia o tempo para você
-    application = ApplicationBuilder().token(TOKEN).build()
-    
-    # Handlers
-    application.add_handler(CommandHandler("start", start))
-    
-    # Configura a busca automática para rodar a cada 300 segundos (5 minutos)
-    job_queue = application.job_queue
-    job_queue.run_repeating(verificar_pncp, interval=300, first=10)
-    
-    print("Bot e Monitoramento iniciados...")
-    application.run_polling(close_loop=False)
+# ... (seus comandos e funções de busca continuam iguais)
+
+def iniciar_flask():
+    """Roda o Flask em uma thread separada"""
+    port = int(os.environ.get("PORT", 10000))
+    # Desativamos o reloader para não dar conflito de threads
+    app.run(host="0.0.0.0", port=port, use_reloader=False)
 
 if __name__ == "__main__":
-    if TOKEN:
-        t = threading.Thread(target=run_telegram_bot, daemon=True)
-        t.start()
-    
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+    if not TOKEN:
+        print("❌ TOKEN não configurado!")
+    else:
+        # 1. Iniciamos o Flask em uma thread de apoio
+        # Isso permite que o UptimeRobot ache o servidor
+        print("🌐 Iniciando servidor Flask para UptimeRobot...")
+        flask_thread = threading.Thread(target=iniciar_flask, daemon=True)
+        flask_thread.start()
+
+        # 2. Iniciamos o Bot na THREAD PRINCIPAL
+        # Isso resolve o erro de 'set_wakeup_fd'
+        print("🚀 Iniciando Bot do Telegram na thread principal...")
+        
+        application = ApplicationBuilder().token(TOKEN).build()
+        
+        # Handlers
+        application.add_handler(CommandHandler("start", start))
+        application.add_handler(CommandHandler("listar", listar))
+        # ... adicione os outros (add, remove, buscar) aqui
+        
+        # Configura o monitoramento automático (JobQueue)
+        if application.job_queue:
+            application.job_queue.run_repeating(verificar_pncp, interval=300, first=10)
+        
+        # O run_polling na thread principal gerencia os sinais corretamente
+        application.run_polling()
