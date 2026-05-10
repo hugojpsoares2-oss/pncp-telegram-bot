@@ -23,16 +23,27 @@ def home():
 # ==========================================
 async def verificar_pncp(context: ContextTypes.DEFAULT_TYPE):
     global CHAT_ID_MONITORAMENTO
+    
+    # Log para você saber que o ciclo de 5 minutos rodou
+    print("🔍 [PNCP] Iniciando busca de novas oportunidades...")
+    
     if not CHAT_ID_MONITORAMENTO:
+        print("⚠️ [PNCP] Busca cancelada: CHAT_ID ainda não definido. Dê /start no Telegram.")
         return
 
     url = "https://pncp.gov.br/api/consulta/v1/contratacoes/publicacao"
     try:
         loop = asyncio.get_event_loop()
+        # Faz a requisição
         resposta = await loop.run_in_executor(None, lambda: requests.get(url, timeout=20))
         
+        print(f"📡 [PNCP] Status da API: {resposta.status_code}")
+
         if resposta.status_code == 200:
             dados = resposta.json().get("data", [])
+            print(f"📦 [PNCP] {len(dados)} itens recebidos do portal.")
+            
+            encontrados_nesta_rodada = 0
             for item in dados:
                 id_item = item.get("numeroControlePNCP")
                 texto = str(item).lower()
@@ -40,6 +51,7 @@ async def verificar_pncp(context: ContextTypes.DEFAULT_TYPE):
                 for palavra in palavras:
                     if palavra.lower() in texto and id_item not in enviados:
                         enviados.add(id_item)
+                        encontrados_nesta_rodada += 1
                         
                         msg = (f"📢 **Nova Oportunidade!**\n\n"
                                f"🔎 Termo: {palavra}\n"
@@ -47,9 +59,13 @@ async def verificar_pncp(context: ContextTypes.DEFAULT_TYPE):
                                f"📄 Objeto: {item.get('objetoCompra', 'Sem descrição')}")
                         
                         await context.bot.send_message(chat_id=CHAT_ID_MONITORAMENTO, text=msg)
-    except Exception as e:
-        print(f"Erro na busca automática: {e}")
+            
+            print(f"✅ [PNCP] Busca finalizada. {encontrados_nesta_rodada} novas oportunidades enviadas.")
+        else:
+            print(f"❌ [PNCP] Erro na API: {resposta.text}")
 
+    except Exception as e:
+        print(f"💥 [PNCP] Erro crítico na busca: {e}")
 # ==========================================
 # FUNÇÕES DOS COMANDOS (Onde estava o erro)
 # ==========================================
