@@ -6,90 +6,111 @@ from flask import Flask
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
+# Configurações Iniciais
 TOKEN = os.getenv("TOKEN")
 app = Flask(__name__)
 
 palavras = ["headset", "webcam", "ssd", "memória ram"]
 enviados = set()
-CHAT_ID_MONITORAMENTO = None # Será preenchido quando você der /start
+CHAT_ID_MONITORAMENTO = None
 
 @app.route("/")
 def home():
     return "Bot PNCP online!"
 
 # ==========================================
-# LÓGICA DE BUSCA (ASSÍNCRONA)
+# LÓGICA DE BUSCA PNCP
 # ==========================================
 async def verificar_pncp(context: ContextTypes.DEFAULT_TYPE):
-    """Função que será executada repetidamente pelo JobQueue"""
     global CHAT_ID_MONITORAMENTO
     if not CHAT_ID_MONITORAMENTO:
         return
 
     url = "https://pncp.gov.br/api/consulta/v1/contratacoes/publicacao"
     try:
-        # Usando loop.run_in_executor para não travar o bot com requests síncrono
         loop = asyncio.get_event_loop()
         resposta = await loop.run_in_executor(None, lambda: requests.get(url, timeout=20))
         
         if resposta.status_code == 200:
             dados = resposta.json().get("data", [])
             for item in dados:
+                id_item = item.get("numeroControlePNCP")
                 texto = str(item).lower()
+                
                 for palavra in palavras:
-                    id_item = item.get("numeroControlePNCP")
                     if palavra.lower() in texto and id_item not in enviados:
                         enviados.add(id_item)
                         
-                        msg = f"📢 **Nova Oportunidade!**\n\n🔎 Termo: {palavra}\n🏢 Órgão: {item.get('orgaoEntidade', {}).get('razaoSocial')}\n📄 Objeto: {item.get('objetoCompra')}"
+                        msg = (f"📢 **Nova Oportunidade!**\n\n"
+                               f"🔎 Termo: {palavra}\n"
+                               f"🏢 Órgão: {item.get('orgaoEntidade', {}).get('razaoSocial')}\n"
+                               f"📄 Objeto: {item.get('objetoCompra', 'Sem descrição')}")
                         
                         await context.bot.send_message(chat_id=CHAT_ID_MONITORAMENTO, text=msg)
     except Exception as e:
-        print(f"Erro na busca: {e}")
+        print(f"Erro na busca automática: {e}")
 
 # ==========================================
-# COMANDOS
+# COMANDOS TELEGRAM
 # ==========================================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global CHAT_ID_MONITORAMENTO
     CHAT_ID_MONITORAMENTO = update.effective_chat.id
     await update.message.reply_text("✅ Monitoramento PNCP ativado neste chat!")
 
-# ==========================================
-# INICIALIZAÇÃO DO BOT
-# ==========================================
-# ... (seus comandos e funções de busca continuam iguais)
+async def listar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    texto = "📋 Palavras monitoradas:\n\n" + "\n".join([f"• {p}" for p in palavras])
+    await update.message.reply_text(texto)
 
+async def add(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("Use: /add palavra")
+        return
+    nova = " ".join(context.args).lower()
+    if nova not in palavras:
+        palavras.append(nova)
+        await update.message.reply_text(f"✅ Adicionada: {nova}")
+    else:
+        await update.message.reply_text("⚠️ Já existe.")
+
+async def remove(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("Use: /remove palavra")
+        return
+    palavra = " ".join(context.args).lower()
+    if palavra in palavras:
+        palavras.remove(palavra)
+        await update.message.reply_text(f"🗑 Removida: {palavra}")
+    else:
+        await update.message.reply_text("❌ Não encontrada.")
+
+# ==========================================
+# INICIALIZAÇÃO
+# ==========================================
 def iniciar_flask():
-    """Roda o Flask em uma thread separada"""
     port = int(os.environ.get("PORT", 10000))
-    # Desativamos o reloader para não dar conflito de threads
     app.run(host="0.0.0.0", port=port, use_reloader=False)
 
 if __name__ == "__main__":
     if not TOKEN:
-        print("❌ TOKEN não configurado!")
+        print("❌ ERRO: Variável TOKEN não configurada no Render!")
     else:
-        # 1. Iniciamos o Flask em uma thread de apoio
-        # Isso permite que o UptimeRobot ache o servidor
-        print("🌐 Iniciando servidor Flask para UptimeRobot...")
-        flask_thread = threading.Thread(target=iniciar_flask, daemon=True)
-        flask_thread.start()
+        # 1. Flask em segundo plano para o UptimeRobot
+        print("🌐 Iniciando Flask (Background)...")
+        threading.Thread(target=iniciar_flask, daemon=True).start()
 
-        # 2. Iniciamos o Bot na THREAD PRINCIPAL
-        # Isso resolve o erro de 'set_wakeup_fd'
-        print("🚀 Iniciando Bot do Telegram na thread principal...")
-        
+        # 2. Bot na Thread Principal (Correção do RuntimeError)
+        print("🚀 Iniciando Bot Telegram (Main Thread)...")
         application = ApplicationBuilder().token(TOKEN).build()
         
         # Handlers
         application.add_handler(CommandHandler("start", start))
         application.add_handler(CommandHandler("listar", listar))
-        # ... adicione os outros (add, remove, buscar) aqui
+        application.add_handler(CommandHandler("add", add))
+        application.add_handler(CommandHandler("remove", remove))
         
-        # Configura o monitoramento automático (JobQueue)
+        # Monitoramento automático a cada 5 min
         if application.job_queue:
             application.job_queue.run_repeating(verificar_pncp, interval=300, first=10)
         
-        # O run_polling na thread principal gerencia os sinais corretamente
         application.run_polling()
